@@ -8,13 +8,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $description = $_POST['description'] ?? '';
     $datePrefix = date('ymd');
 
-    // Convert to date and time parts
+    // Extract date and time
     $startDate = date('Y-m-d', strtotime($startDateTime));
     $startTime = date('H:i:s', strtotime($startDateTime));
     $endDate = date('Y-m-d', strtotime($endDateTime));
     $endTime = date('H:i:s', strtotime($endDateTime));
 
-    // Step 1: Generate Reservation ID
+    // Step 1: Generate Reservation ID (include all records, even soft-deleted ones)
     $getLastId = "SELECT TOP 1 id FROM Reservations WHERE id LIKE 'R$datePrefix-%' ORDER BY id DESC";
     $stmt = sqlsrv_query($conn, $getLastId);
     $newId = "R$datePrefix-1";
@@ -24,21 +24,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $newId = "R$datePrefix-" . ($lastNumber + 1);
     }
 
-    // Step 2: Check for overlapping reservations
-    $grace = 15; // Grace period in minutes
+
+    // Step 2: Overlap check
     $check = "
         SELECT *
         FROM Reservations
-        WHERE (
-            (CAST(reservation_date AS DATETIME) + CAST(reservation_time AS DATETIME)) < DATEADD(MINUTE, ?, CAST(? AS DATETIME))
-            AND
-            (CAST(reservation_date_end AS DATETIME) + CAST(reservation_end_time AS DATETIME)) > CAST(? AS DATETIME)
-        )";
-    
-    $stmt = sqlsrv_query($conn, $check, [$grace, $endDateTime, $startDateTime]);
-
+        WHERE deleted_at IS NULL
+          AND (
+              (
+                CAST(reservation_date AS DATETIME) + CAST(reservation_time AS DATETIME)
+                < ?
+              )
+              AND (
+                CAST(reservation_date_end AS DATETIME) + CAST(reservation_end_time AS DATETIME)
+                > ?
+              )
+          )
+    ";
+    $stmt = sqlsrv_query($conn, $check, [$endDateTime, $startDateTime]);
     if ($stmt === false) {
-        die(print_r(sqlsrv_errors(), true));
+        die("❌ Overlap Check Error:<br><pre>" . print_r(sqlsrv_errors(), true) . "</pre>");
     }
 
     if (sqlsrv_has_rows($stmt)) {
@@ -46,19 +51,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         exit();
     }
 
-    // Step 3: Insert reservation
+    // Step 3: Insert into Reservations
     $insert = "
         INSERT INTO Reservations 
         (id, name, reservation_date, reservation_time, reservation_date_end, reservation_end_time, description) 
         VALUES (?, ?, ?, ?, ?, ?, ?)";
-    $params = [$newId, $name, $startDate, $startTime, $endDate, $endTime, $description];
+    $params = [
+        $newId,
+        $name,
+        $startDate,
+        $startTime,
+        $endDate,
+        $endTime,
+        $description
+    ];
+
     $result = sqlsrv_query($conn, $insert, $params);
 
-    if ($result) {
-        header("Location: index.php?status=success");
+    if ($result === false) {
+        die("❌ Insert Failed:<br><pre>" . print_r(sqlsrv_errors(), true) . "</pre>");
     } else {
-        header("Location: index.php?status=error");
+        header("Location: index.php?status=success");
+        exit();
     }
-    exit();
 }
 ?>
