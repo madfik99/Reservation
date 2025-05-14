@@ -3,35 +3,39 @@ require 'config.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $name = $_POST['name'];
-    $date = date('Y-m-d', strtotime($_POST['date']));
-    $time = date('H:i:s', strtotime($_POST['time']));
-    $description = $_POST['description'] ?? '';  // Get the description if provided, else default to empty string.
-    $datePrefix = date('ymd');  // Get the current date in YYMMDD format (e.g., '250512')
+    $startDateTime = $_POST['start_datetime'];
+    $endDateTime = $_POST['end_datetime'];
+    $description = $_POST['description'] ?? '';
+    $datePrefix = date('ymd');
 
-    // Step 1: Get the last reservation ID for today
+    // Convert to date and time parts
+    $startDate = date('Y-m-d', strtotime($startDateTime));
+    $startTime = date('H:i:s', strtotime($startDateTime));
+    $endDate = date('Y-m-d', strtotime($endDateTime));
+    $endTime = date('H:i:s', strtotime($endDateTime));
+
+    // Step 1: Generate Reservation ID
     $getLastId = "SELECT TOP 1 id FROM Reservations WHERE id LIKE 'R$datePrefix-%' ORDER BY id DESC";
     $stmt = sqlsrv_query($conn, $getLastId);
-
-    if ($stmt === false) {
-        die(print_r(sqlsrv_errors(), true));
-    }
-
-    // Step 2: Generate the next reservation ID
-    $newId = "R$datePrefix-1"; // Default to 1 if no records are found
-    if (sqlsrv_has_rows($stmt)) {
+    $newId = "R$datePrefix-1";
+    if ($stmt && sqlsrv_has_rows($stmt)) {
         $row = sqlsrv_fetch_array($stmt);
-        $lastId = $row['id'];
-
-        // Extract the last number from the ID (e.g., 'R250512-5' -> 5)
-        $lastNumber = (int) substr($lastId, strlen($lastId) - 1);
-        
-        // Increment the last number by 1
+        $lastNumber = (int) substr($row['id'], strrpos($row['id'], '-') + 1);
         $newId = "R$datePrefix-" . ($lastNumber + 1);
     }
 
-    // Step 3: Check if the reservation time is available
-    $check = "SELECT * FROM Reservations WHERE CAST(reservation_date AS DATE) = ? AND CAST(reservation_time AS TIME) = ?";
-    $stmt = sqlsrv_query($conn, $check, [$date, $time]);
+    // Step 2: Check for overlapping reservations
+    $grace = 15; // Grace period in minutes
+    $check = "
+        SELECT *
+        FROM Reservations
+        WHERE (
+            (CAST(reservation_date AS DATETIME) + CAST(reservation_time AS DATETIME)) < DATEADD(MINUTE, ?, CAST(? AS DATETIME))
+            AND
+            (CAST(reservation_date_end AS DATETIME) + CAST(reservation_end_time AS DATETIME)) > CAST(? AS DATETIME)
+        )";
+    
+    $stmt = sqlsrv_query($conn, $check, [$grace, $endDateTime, $startDateTime]);
 
     if ($stmt === false) {
         die(print_r(sqlsrv_errors(), true));
@@ -40,18 +44,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (sqlsrv_has_rows($stmt)) {
         header("Location: index.php?status=unavailable");
         exit();
-    } else {
-        // Step 4: Insert the reservation with the auto-generated ID, including description
-        $insert = "INSERT INTO Reservations (id, name, reservation_date, reservation_time, description) VALUES (?, ?, ?, ?, ?)";
-        $params = [$newId, $name, $date, $time, $description];
-        $result = sqlsrv_query($conn, $insert, $params);
-
-        if ($result) {
-            header("Location: index.php?status=success");
-        } else {
-            header("Location: index.php?status=error");
-        }
-        exit();
     }
+
+    // Step 3: Insert reservation
+    $insert = "
+        INSERT INTO Reservations 
+        (id, name, reservation_date, reservation_time, reservation_date_end, reservation_end_time, description) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $params = [$newId, $name, $startDate, $startTime, $endDate, $endTime, $description];
+    $result = sqlsrv_query($conn, $insert, $params);
+
+    if ($result) {
+        header("Location: index.php?status=success");
+    } else {
+        header("Location: index.php?status=error");
+    }
+    exit();
 }
 ?>

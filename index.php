@@ -5,6 +5,9 @@
   <meta charset="UTF-8">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.0/main.min.css" />
   <link rel="stylesheet" href="https://unpkg.com/tippy.js@6/themes/light-border.css" />
+  <!-- Flatpickr CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -163,7 +166,9 @@
     <h3>Reservation Details</h3>
     <p><strong>Name:</strong> <span id="modalName"></span></p>
     <p><strong>Date:</strong> <span id="modalDate"></span></p>
+    <p><strong>Date:</strong> <span id="modalDate"></span> to <span id="modalDateEnd"></span></p>
     <p><strong>Time:</strong> <span id="modalTime"></span></p>
+    <p><strong>Time:</strong> <span id="modalTime"></span> to <span id="modalTimeEnd"></span></p>
     <p><strong>Description:</strong> <span id="modalDescription"></span></p>
   </div>
 </div>
@@ -175,8 +180,8 @@
     <h2>Make a Reservation</h2>
     <form method="POST" action="reserve.php">
       Name: <input type="text" name="name" required><br>
-      Date: <input type="date" name="date" required><br>
-      Time: <input type="time" name="time" required><br>
+      Start Date & Time: <input type="text" id="startDateTime" name="start_datetime" required><br>
+      End Date & Time: <input type="text" id="endDateTime" name="end_datetime" required><br>
       Description: <input type="text" name="description" maxlength="255"><br>
       <input type="submit" value="Reserve">
     </form>
@@ -190,75 +195,98 @@
 
 <script>
   document.addEventListener('DOMContentLoaded', function() {
-    let calendarEl = document.getElementById('calendar');
+  let calendarEl = document.getElementById('calendar');
 
-    let calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth',
-      headerToolbar: {
-        left: 'prev,next today',
-        center: 'title',
-        right: 'dayGridMonth,timeGridWeek,timeGridDay'
-      },
-      events: 'get_unavailable_dates.php',
-      eventDidMount: function(info) {
-        tippy(info.el, {
-          content: info.event.title,
-          animation: 'scale',
-          theme: 'light-border'
-        });
-      },
-      eventClick: function(info) {
-        document.getElementById("modalName").innerText = info.event.title;
-        document.getElementById("modalDate").innerText = info.event.start.toLocaleDateString();
-        document.getElementById("modalTime").innerText = info.event.start.toLocaleTimeString();
-        document.getElementById("modalDescription").innerText = info.event.extendedProps.description;
-        document.getElementById("reservationModal").style.display = "block";
-      }
-    });
-
-    calendar.render();
-
-    // Modal close buttons
-    document.getElementById("closeDetails").onclick = function() {
-      document.getElementById("reservationModal").style.display = "none";
-    };
-    document.getElementById("closeForm").onclick = function() {
-      document.getElementById("reservationFormModal").style.display = "none";
-    };
-
-    // Show the reservation form modal when the button is clicked
-    document.getElementById("toggleFormButton").onclick = function() {
-      document.getElementById("reservationFormModal").style.display = "block";
-    };
-
-    window.onclick = function(event) {
-      if (event.target == document.getElementById("reservationModal")) {
-        document.getElementById("reservationModal").style.display = "none";
-      }
-      if (event.target == document.getElementById("reservationFormModal")) {
-        document.getElementById("reservationFormModal").style.display = "none";
-      }
-    };
-
-    // Hide status message and reset URL
-    if (window.location.search.includes("status=")) {
-      setTimeout(function() {
-        const msg = document.getElementById("statusMessage");
-        if (msg) msg.style.display = "none";
-        window.history.replaceState(null, null, window.location.pathname);
-      }, 3000);
+  let calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: 'dayGridMonth',
+    headerToolbar: {
+      left: 'prev,next today',
+      center: 'title',
+      right: 'dayGridMonth,timeGridWeek,timeGridDay'
+    },
+    events: 'get_unavailable_dates.php',
+    eventDidMount: function(info) {
+      tippy(info.el, {
+        content: info.event.title,
+        animation: 'scale',
+        theme: 'light-border'
+      });
+    },
+    eventClick: function(info) {
+      document.getElementById("modalName").innerText = info.event.title;
+      document.getElementById("modalDate").innerText = info.event.start.toLocaleDateString();
+      document.getElementById("modalTime").innerText = info.event.start.toLocaleTimeString();
+      document.getElementById("modalDateEnd").innerText = info.event.end ? info.event.end.toLocaleDateString() : "-";
+      document.getElementById("modalTimeEnd").innerText = info.event.end ? info.event.end.toLocaleTimeString() : "-";
+      document.getElementById("modalDescription").innerText = info.event.extendedProps.description;
+      document.getElementById("reservationModal").style.display = "block";
     }
-
-    // Custom navigation buttons functionality
-    document.getElementById("prevMonthButton").onclick = function() {
-      calendar.prev();
-    };
-
-    document.getElementById("nextMonthButton").onclick = function() {
-      calendar.next();
-    };
   });
+
+  calendar.render();
+
+  // Flatpickr setup for start and end date/time
+  const endPicker = flatpickr("#endDateTime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    minDate: "today"
+  });
+
+  flatpickr("#startDateTime", {
+    enableTime: true,
+    dateFormat: "Y-m-d H:i",
+    minDate: "today",
+    onChange: function(selectedDates, dateStr, instance) {
+      endPicker.set('minDate', dateStr); // Update end datepicker minDate based on selected start date
+    }
+  });
+
+  // Modal close buttons
+  document.getElementById("closeDetails").onclick = function() {
+    document.getElementById("reservationModal").style.display = "none";
+  };
+
+  document.getElementById("closeForm").onclick = function() {
+    document.getElementById("reservationFormModal").style.display = "none";
+  };
+
+  // Show the reservation form modal when the button is clicked
+  document.getElementById("toggleFormButton").onclick = function() {
+    document.getElementById("reservationFormModal").style.display = "block";
+  };
+
+  // Close modals when clicking outside of them
+  window.onclick = function(event) {
+    if (event.target == document.getElementById("reservationModal")) {
+      document.getElementById("reservationModal").style.display = "none";
+    }
+    if (event.target == document.getElementById("reservationFormModal")) {
+      document.getElementById("reservationFormModal").style.display = "none";
+    }
+  };
+
+  // Hide status message and reset URL
+  if (window.location.search.includes("status=")) {
+    setTimeout(function() {
+      const msg = document.getElementById("statusMessage");
+      if (msg) msg.style.display = "none";
+      window.history.replaceState(null, null, window.location.pathname);
+    }, 3000);
+  }
+
+  // Custom navigation buttons functionality
+  document.getElementById("prevMonthButton").onclick = function() {
+    calendar.prev();
+  };
+
+  document.getElementById("nextMonthButton").onclick = function() {
+    calendar.next();
+  };
+});
+
 </script>
+<!-- Flatpickr JS -->
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
 </body>
 </html>
